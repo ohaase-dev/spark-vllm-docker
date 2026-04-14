@@ -3,6 +3,13 @@
 # Limit build parallelism to reduce OOM situations
 ARG BUILD_JOBS=16
 
+###
+# TODO: 
+#  - pin torch versions?
+#  - make patch steps optional by arg?
+#  - docker speedups with git hashes?
+####
+
 # =========================================================
 # STAGE 1: Base Build Image
 # =========================================================
@@ -16,6 +23,13 @@ ENV NINJAFLAGS="-j${BUILD_JOBS}"
 ENV MAKEFLAGS="-j${BUILD_JOBS}"
 ENV DG_JIT_USE_NVRTC=1
 ENV USE_CUDNN=1
+
+# Build argumnents and versions
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ARG FLASHINFER_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
+ENV NVCC_APPEND_FLAGS="-Xcompiler=-Wno-deprecated-declarations -diag-suppress=20012 -diag-suppress=20013 -diag-suppress=20014 -diag-suppress=20015"
 
 # Set non-interactive frontend to prevent apt prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -36,22 +50,44 @@ ENV UV_HTTP_RETRIES=10
 # Set the base directory environment variable
 ENV VLLM_BASE_DIR=/workspace/vllm
 
-# 1. Install Build Dependencies & Ccache
-# Added ccache to enable incremental compilation caching
-RUN apt update && \
+
+# 1. Install apt runtime dependencies
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt update && \
     apt install -y --no-install-recommends \
-    curl vim cmake build-essential ninja-build \
-    libcudnn9-cuda-13 libcudnn9-dev-cuda-13 \
-    python3-dev python3-pip git wget \
+    python3 python3-pip python3-dev vim curl git wget \
+    libcudnn9-cuda-13 \
     libibverbs1 libibverbs-dev rdma-core \
-    ccache devscripts debhelper fakeroot \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install uv
+    libxcb1
+
+RUN pip install uv
+
+ARG TORCH_CUDA_VERSION="cu130" #use cu130, cu132 throws symbol errors
+ARG TORCH_CHANEL="${TORCH_CUDA_VERSION}"
+ARG TORCH_VERSION="2.11.0" #last working; 2.12 -> symbol errors
+
+# Install pip runtime deps
+#uv pip install torch torchvision torchaudio triton --index-url https://download.pytorch.org/whl/nightly/cu132 && \ 
+#uv pip install torch==2.11.0 torchvision torchaudio triton --index-url https://download.pytorch.org/whl/cu130 && \
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+     uv pip install torch==${TORCH_VERSION} torchvision torchaudio triton --prerelease=allow --index-url https://download.pytorch.org/whl/${TORCH_CHANEL} && \
+     uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"
+
+FROM base AS builder
+# 2. Install Build Dependencies & Ccache
+# Added ccache to enable incremental compilation caching
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt update && \
+    apt install -y --no-install-recommends \
+    cmake build-essential ninja-build \
+    libcudnn9-dev-cuda-13 \
+    ccache devscripts debhelper fakeroot
 
 # Additional deps
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-     uv pip install torch==2.11.0 torchvision torchaudio triton --index-url https://download.pytorch.org/whl/cu130 && \
-     uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2" filelock pynvml requests tqdm packaging
+     uv pip install filelock pynvml requests tqdm packaging
 
 # Configure Ccache for CUDA/C++
 ENV PATH=/usr/lib/ccache:$PATH
@@ -65,8 +101,6 @@ ENV CMAKE_CXX_COMPILER_LAUNCHER=ccache
 ENV CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
 # 2. Set Environment Variables
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
-ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 
 # Setup Workspace
@@ -80,10 +114,8 @@ RUN git clone -b dgxspark-3node-ring https://github.com/zyang-dev/nccl.git && \
 # =========================================================
 # STAGE 2: FlashInfer Builder
 # =========================================================
-FROM base AS flashinfer-builder
+FROM builder AS flashinfer-builder
 
-ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
-ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
 ARG FLASHINFER_REF=main
 
@@ -161,10 +193,8 @@ COPY --from=flashinfer-builder /workspace/wheels /
 # =========================================================
 # STAGE 4: vLLM Builder
 # =========================================================
-FROM base AS vllm-builder
+FROM builder AS vllm-builder
 
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
-ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
 
 # --- VLLM SOURCE CACHE BUSTER ---
@@ -263,41 +293,12 @@ COPY --from=vllm-builder /workspace/wheels /
 # =========================================================
 # STAGE 6: Runner (Installs wheels from host ./wheels/)
 # =========================================================
-FROM nvidia/cuda:13.2.0-devel-ubuntu24.04 AS runner
+FROM base AS runner
 
-# Transferring build settings from build image because of ptxas/jit compilation during vLLM startup
-# Build parallemism
-ARG BUILD_JOBS
-ENV MAX_JOBS=${BUILD_JOBS}
-ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
-ENV NINJAFLAGS="-j${BUILD_JOBS}"
-ENV MAKEFLAGS="-j${BUILD_JOBS}"
-ENV DG_JIT_USE_NVRTC=1
-ENV USE_CUDNN=1
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PIP_BREAK_SYSTEM_PACKAGES=1
-ENV VLLM_BASE_DIR=/workspace/vllm
-
-# Set pip cache directory
-ENV PIP_CACHE_DIR=/root/.cache/pip
-ENV UV_CACHE_DIR=/root/.cache/uv
-ENV UV_SYSTEM_PYTHON=1
-ENV UV_BREAK_SYSTEM_PACKAGES=1
-ENV UV_LINK_MODE=copy
-
-# Mount additional packages from base builder image
-# Install runtime dependencies
-RUN --mount=type=bind,from=base,source=/workspace/vllm/nccl/build/pkg/deb,target=/workspace/nccl-pkg \
-    apt update && \
-    apt install -y --no-install-recommends \
-    python3 python3-pip python3-dev vim curl git wget \
-    libcudnn9-cuda-13 \
-    libibverbs1 libibverbs-dev rdma-core \
-    libxcb1 \
-    && cd /workspace/nccl-pkg && apt install -y --no-install-recommends --allow-downgrades ./*.deb \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install uv
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=bind,from=builder,source=/workspace/vllm/nccl/build/pkg/deb,target=/workspace/nccl-pkg \
+    cd /workspace/nccl-pkg && apt install -y --no-install-recommends --allow-downgrades ./*.deb 
 
 # Set final working directory
 WORKDIR $VLLM_BASE_DIR
@@ -308,11 +309,6 @@ RUN mkdir -p tiktoken_encodings && \
     wget -O tiktoken_encodings/cl100k_base.tiktoken "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
 
 ARG PRE_TRANSFORMERS=0
-
-# Install deps
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-     uv pip install torch==2.11.0 torchvision torchaudio triton --index-url https://download.pytorch.org/whl/cu130 && \
-     uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"
 
 # Install wheels from host ./wheels/ (bind-mounted from build context — no layer bloat)
 # With --tf5: override vLLM's transformers<5 constraint to get transformers>=5
@@ -326,10 +322,6 @@ RUN --mount=type=bind,source=wheels,target=/workspace/wheels \
     fi
 
 # Setup environment for runtime
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
-ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
-ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
-ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 ENV PATH=$VLLM_BASE_DIR:$PATH
