@@ -67,9 +67,6 @@ ARG TORCH_CUDA_VERSION="cu130" #use cu130, cu132 throws symbol errors
 ARG TORCH_CHANEL="${TORCH_CUDA_VERSION}"
 ARG TORCH_VERSION="2.11.0" #last working; 2.12 -> symbol errors
 
-# Install pip runtime deps
-#uv pip install torch torchvision torchaudio triton --index-url https://download.pytorch.org/whl/nightly/cu132 && \ 
-#uv pip install torch==2.11.0 torchvision torchaudio triton --index-url https://download.pytorch.org/whl/cu130 && \
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
      uv pip install torch==${TORCH_VERSION} torchvision torchaudio triton --prerelease=allow --index-url https://download.pytorch.org/whl/${TORCH_CHANEL} && \
      uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"
