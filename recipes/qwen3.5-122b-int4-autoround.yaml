@@ -18,8 +18,7 @@ build_args:
 
 # Mod required to fix ROPE syntax error
 mods:
-  - mods/fix-qwen3.5-autoround
-  - mods/fix-qwen3.5-chat-template
+  - mods/fix-qwen3.5-enhanced-chat-template
 
 # Default settings (can be overridden via CLI)
 defaults:
@@ -48,7 +47,7 @@ command: |
     --reasoning-parser qwen3 \
     --max-num-batched-tokens {max_num_batched_tokens} \
     --trust-remote-code \
-    --chat-template unsloth.jinja \
+    --chat-template qwen3.5-enhanced.jinja \
     -tp {tensor_parallel} \
     --distributed-executor-backend ray
 

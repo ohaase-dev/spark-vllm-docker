@@ -1,0 +1,66 @@
+# Recipe: Qwen3.6-35B-A3B-NVFP4
+# Qwen3.6-35B model in RedHat NVFP4 quantization
+
+recipe_version: "1"
+name: Qwen3.6-35B-A3B-NVFP4
+description: vLLM serving Qwen3.6-35B-A3B-NVFP4
+
+# HuggingFace model to download (optional, for --download-model)
+model: RedHatAI/Qwen3.6-35B-A3B-NVFP4
+
+solo_only: true
+
+# Container image to use
+container: vllm-node-tf5
+
+build_args:
+  - --tf5
+
+# Mod required to fix ROPE syntax error
+mods:
+  - mods/fix-qwen3.6-redhat-nvfp4-config
+
+# Default settings (can be overridden via CLI)
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  gpu_memory_utilization: 0.8
+  max_model_len: 262144
+  max_num_batched_tokens: 32768
+  max-num-seqs: 8
+  speculative_config: '{"method": "qwen3_next_mtp", "num_speculative_tokens": 3}'
+  default-chat-template-kwargs: '{"enable_thinking": true,"preserve_thinking": true}'
+  coding_config_orig: '{"temperature": 0.7,  "top_p": 0.8, "top_k": 20, "presence_penalty": 0.0, "repetition_penalty": 1.0}'
+  writing_config: '{"temperature": 0.9,  "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5, "repetition_penalty": 1.1}'
+  qwen_coding_config: '{ "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repetition_penalty": 1.0 }'
+  coding_config_agentic: '{"temperature": 0.3, "top_p": 0.95, "top_k": -1, "repetition_penalty": 1.0}'
+  coding_config: '{"temperature": 0.0, "top_p": 1.0, "top_k": -1, "repetition_penalty": 1.0}'
+
+# Environment variables
+env:
+  VLLM_USE_FLASHINFER_MOE_FP4: 1
+
+# The vLLM serve command template
+command: |
+  vllm serve RedHatAI/Qwen3.6-35B-A3B-NVFP4 \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --port {port} \
+    --host {host} \
+    --load-format instanttensor \
+    --enable-chunked-prefill \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max-num-seqs} \
+    --dtype bfloat16 \
+    --attention_backend flashinfer \
+    --moe_backend flashinfer_cutlass \
+    --trust-remote-code \
+    --speculative-config '{speculative_config}' \
+    --override-generation-config '{coding_config_agentic}' \
+    --default-chat-template-kwargs '{default-chat-template-kwargs}' \
+    --enable-prefix-caching
+
+#--kv-cache-dtype fp8 \
