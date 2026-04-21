@@ -17,8 +17,8 @@ build_args:
   - --tf5
 
 # Mod required to fix ROPE syntax error
-mods:
-  - mods/fix-qwen3.6-redhat-nvfp4-config
+#mods:
+
 
 # Default settings (can be overridden via CLI)
 defaults:
