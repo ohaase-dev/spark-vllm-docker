@@ -63,13 +63,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 RUN pip install uv
 
-ARG TORCH_CUDA_VERSION="cu130" #use cu130, cu132 throws symbol errors
-ARG TORCH_CHANEL="${TORCH_CUDA_VERSION}"
-ARG TORCH_VERSION="2.11.0" #last working; 2.12 -> symbol errors
+ARG TORCH_CUDA_VERSION="cu132" #use cu130, cu132 throws symbol errors
+ARG TORCH_CHANEL="nightly/${TORCH_CUDA_VERSION}"
+#ARG TORCH_VERSION="2.11.0" #last working; 2.12 -> symbol errors
+#==${TORCH_VERSION}
 
 # Install pip runtime deps
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-     uv pip install torch==${TORCH_VERSION} torchvision torchaudio triton --prerelease=allow --index-url https://download.pytorch.org/whl/${TORCH_CHANEL} && \
+     uv pip install torch torchvision torchaudio triton --prerelease=allow --index-url https://download.pytorch.org/whl/${TORCH_CHANEL} && \
      uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"
 
 FROM base AS builder
@@ -245,15 +246,7 @@ RUN curl -fsL https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pul
        fi \
     && rm pr35568.diff
 
-# TEMPORARY PATCH to re-enable Flashinfer 0.6.8 - https://github.com/vllm-project/vllm/pull/39959
-RUN curl -fsL https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/39959.diff -o pr39959.diff \
-    && if git apply --reverse --check pr39959.diff 2>/dev/null; then \
-         echo "PR 39959 already applied, skipping."; \
-       else \
-         echo "Applying PR 39959..."; \
-         git apply -v pr39959.diff; \
-       fi \
-    && rm pr39959.diff
+
 
 # Prepare build requirements
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
@@ -323,6 +316,8 @@ RUN --mount=type=bind,source=wheels,target=/workspace/wheels \
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 ENV PATH=$VLLM_BASE_DIR:$PATH
+# UNSET VLLM_BASE_DIR to avoid confusion, since it's only needed at build time for vLLM source code location and is not used at runtime
+ENV VLLM_BASE_DIR=
 
 
 # Final extra deps
