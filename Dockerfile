@@ -322,7 +322,7 @@ ENV VLLM_BASE_DIR=
 
 # Final extra deps
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install ray[default] fastsafetensors instanttensor
+    uv pip install ray[default] fastsafetensors instanttensor nixl[cu13]
 
 # Fix NCCL
 RUN rm /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2 && \
