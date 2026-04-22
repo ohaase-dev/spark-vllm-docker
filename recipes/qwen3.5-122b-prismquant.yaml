@@ -19,7 +19,6 @@ build_args:
 # Mod required to fix ROPE syntax error
 mods:
   - mods/fix-qwen3.5-enhanced-chat-template
-  # - mods/fix-nixl-cu13
 
 # Default settings (can be overridden via CLI)
 defaults:
@@ -29,7 +28,7 @@ defaults:
   max_model_len: 262144
   max_num_batched_tokens: 32768
   max-num-seqs: 8
-  speculative_config: '{"method": "qwen3_next_mtp", "num_speculative_tokens": 2}'
+  speculative_config: '{"method": "mtp", "num_speculative_tokens": 2}'
   default-chat-template-kwargs: '{"enable_thinking": true,"preserve_thinking": true}'
   coding_config_orig: '{"temperature": 0.7,  "top_p": 0.8, "top_k": 20, "presence_penalty": 0.0, "repetition_penalty": 1.0}'
   writing_config: '{"temperature": 0.9,  "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5, "repetition_penalty": 1.1}'

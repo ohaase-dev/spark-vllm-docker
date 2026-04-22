@@ -17,7 +17,8 @@ build_args:
   - --tf5
 
 # Mod required to fix ROPE syntax error
-# mods:
+mods:
+  - mods/fix-nixl-cu13
 #  - mods/fix-qwen3.5-enhanced-chat-template
 
 # Default settings (can be overridden via CLI)
